@@ -76,10 +76,41 @@ app.post('/api/analyze', async (req, res) => {
     console.log('  예외 적용:', finalResult.exceptionInfo?.applied ? 'YES' : 'NO');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-    res.json({
-      success: true,
-      data: finalResult
-    });
+    // 응답 데이터 안전성 검증
+    try {
+      const responseData = {
+        success: true,
+        data: finalResult
+      };
+
+      // finalResult 구조 검증
+      if (!finalResult || typeof finalResult !== 'object') {
+        throw new Error('Invalid finalResult structure');
+      }
+
+      // 안전한 응답 데이터 생성
+      const safeResponseData = {
+        success: Boolean(responseData.success),
+        data: {
+          overallScore: Number(finalResult.overallScore) || 0,
+          categories: finalResult.categories || {},
+          exceptionInfo: finalResult.exceptionInfo || null,
+          timestamp: finalResult.timestamp || new Date().toISOString(),
+          url: String(finalResult.url || url)
+        }
+      };
+
+      console.log('✅ [응답 데이터 검증 완료]');
+      res.json(safeResponseData);
+
+    } catch (validationError) {
+      console.error('❌ [응답 데이터 검증 실패]:', validationError);
+      res.status(500).json({
+        success: false,
+        error: 'Response data validation failed',
+        details: validationError.message
+      });
+    }
 
   } catch (error) {
     console.error('❌ [API 에러]:', error);
