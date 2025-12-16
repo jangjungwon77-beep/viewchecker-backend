@@ -11,8 +11,17 @@ const { applyExceptions } = require('./exceptionHandler');
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-// 미들웨어
-app.use(cors());
+// 미들웨어 - CORS 명시적 설정
+app.use(cors({
+  origin: [
+    'https://viewchecker-new.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // 요청 로깅
