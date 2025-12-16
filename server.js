@@ -87,29 +87,45 @@ app.post('/api/analyze', async (req, res) => {
 
     // 응답 데이터 안전성 검증
     try {
-      const responseData = {
-        success: true,
-        data: finalResult
-      };
-
       // finalResult 구조 검증
       if (!finalResult || typeof finalResult !== 'object') {
         throw new Error('Invalid finalResult structure');
       }
 
-      // 안전한 응답 데이터 생성
+      // 안전한 응답 데이터 생성 (모든 필드 포함)
       const safeResponseData = {
-        success: Boolean(responseData.success),
+        success: true,
         data: {
-          overallScore: Number(finalResult.overallScore) || 0,
-          categories: finalResult.categories || {},
-          exceptionInfo: finalResult.exceptionInfo || null,
+          url: String(finalResult.url || url),
+          viewport: finalResult.viewport || viewport,
           timestamp: finalResult.timestamp || new Date().toISOString(),
-          url: String(finalResult.url || url)
+          executionTime: finalResult.executionTime || 0,
+          
+          // KRDS 점수
+          overallScore: Number(finalResult.overallScore) || 0,
+          
+          // 카테고리별 상세 데이터
+          designStyles: finalResult.designStyles || [],
+          components: finalResult.components || [],
+          basicPatterns: finalResult.basicPatterns || [],
+          servicePatterns: finalResult.servicePatterns || [],
+          
+          // KRDS 컴플라이언스
+          krdsCompliance: finalResult.krdsCompliance || {},
+          
+          // ♿ axe-core 접근성 분석 결과
+          axeResults: finalResult.axeResults || null,
+          kwcagReport: finalResult.kwcagReport || null,
+          
+          // 예외 처리 정보
+          exceptionInfo: finalResult.exceptionInfo || null
         }
       };
 
       console.log('✅ [응답 데이터 검증 완료]');
+      console.log('  axeResults:', safeResponseData.data.axeResults ? '✓' : '✗');
+      console.log('  kwcagReport:', safeResponseData.data.kwcagReport ? '✓' : '✗');
+      
       res.json(safeResponseData);
 
     } catch (validationError) {

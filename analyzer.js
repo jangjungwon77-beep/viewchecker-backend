@@ -4,6 +4,12 @@
  */
 
 const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
+
+// axe-core 스크립트 로드
+const axeCorePath = require.resolve('axe-core');
+const axeCoreSource = fs.readFileSync(axeCorePath, 'utf-8');
 
 /**
  * 웹사이트 분석 메인 함수
@@ -103,6 +109,10 @@ async function performKRDSAnalysis(page) {
   // 4. 서비스 패턴 분석
   const servicePatterns = await analyzeServicePatterns(page);
 
+  // 5. ♿ axe-core 접근성 분석 (KWCAG)
+  console.log('♿ axe-core 접근성 분석 중...');
+  const { axeResults, kwcagReport } = await runAxeAnalysis(page);
+
   // 전체 점수 계산
   const overallScore = calculateOverallScore({
     designStyles,
@@ -117,6 +127,8 @@ async function performKRDSAnalysis(page) {
     components,
     basicPatterns,
     servicePatterns,
+    axeResults,      // ♿ axe-core 원본 결과
+    kwcagReport,     // ♿ KWCAG 형식 보고서
     krdsCompliance: {
       score: overallScore,
       designTokensDetail: convertDesignStylesToTokens(designStyles),
@@ -399,6 +411,150 @@ function calculateCategoryScore(items) {
   
   const total = items.reduce((sum, item) => sum + (item.score || 0), 0);
   return Math.round(total / items.length);
+}
+
+/**
+ * ♿ axe-core 접근성 분석
+ */
+async function runAxeAnalysis(page) {
+  try {
+    // axe-core 스크립트 주입
+    await page.addScriptTag({ content: axeCoreSource });
+    
+    // axe.run() 실행
+    const axeResults = await page.evaluate(async () => {
+      // axe 설정 (한국어 + WCAG 2.1 AA)
+      const options = {
+        runOnly: {
+          type: 'tag',
+          values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']
+        },
+        resultTypes: ['violations', 'passes', 'incomplete']
+      };
+      
+      const results = await window.axe.run(document, options);
+      
+      return {
+        violations: results.violations || [],
+        passes: results.passes || [],
+        incomplete: results.incomplete || [],
+        inapplicable: results.inapplicable || [],
+        timestamp: results.timestamp
+      };
+    });
+    
+    console.log('✅ axe-core 분석 완료:', {
+      violations: axeResults.violations.length,
+      passes: axeResults.passes.length
+    });
+    
+    // KWCAG 보고서 생성
+    const kwcagReport = generateKWCAGReport(axeResults);
+    
+    return { axeResults, kwcagReport };
+    
+  } catch (error) {
+    console.error('⚠️ axe-core 분석 실패:', error.message);
+    
+    // 실패 시 기본값 반환
+    return {
+      axeResults: {
+        violations: [],
+        passes: [],
+        incomplete: [],
+        inapplicable: [],
+        timestamp: new Date().toISOString()
+      },
+      kwcagReport: {
+        overallCompliance: 0,
+        wcagLevel: 'None',
+        violations: 0,
+        passes: 0,
+        byCategory: {
+          perceivable: 0,
+          operable: 0,
+          understandable: 0,
+          robust: 0
+        }
+      }
+    };
+  }
+}
+
+/**
+ * ♿ KWCAG 보고서 생성 (axe-core 결과 변환)
+ */
+function generateKWCAGReport(axeResults) {
+  const violations = axeResults.violations || [];
+  const passes = axeResults.passes || [];
+  const totalTests = violations.length + passes.length;
+  
+  // 전체 준수율
+  const overallCompliance = totalTests > 0 
+    ? Math.round((passes.length / totalTests) * 100) 
+    : 0;
+  
+  // WCAG Level 판정
+  const criticalViolations = violations.filter(v => 
+    v.impact === 'critical' || v.impact === 'serious'
+  );
+  const wcagLevel = violations.length === 0 ? 'AA' : 
+                    criticalViolations.length === 0 ? 'A' : 'None';
+  
+  // 카테고리별 분류 (WCAG 4대 원칙)
+  const categorizeRule = (id) => {
+    if (/color|contrast|image|text|alt|audio|video|caption/.test(id)) return 'perceivable';
+    if (/keyboard|focus|navigation|timing|seizure|pointer/.test(id)) return 'operable';
+    if (/label|lang|heading|error|input|readable/.test(id)) return 'understandable';
+    if (/valid|parse|name|role|value|aria/.test(id)) return 'robust';
+    return 'perceivable';
+  };
+  
+  const categories = {
+    perceivable: { violations: 0, passes: 0 },
+    operable: { violations: 0, passes: 0 },
+    understandable: { violations: 0, passes: 0 },
+    robust: { violations: 0, passes: 0 }
+  };
+  
+  violations.forEach(v => {
+    const cat = categorizeRule(v.id);
+    categories[cat].violations++;
+  });
+  
+  passes.forEach(p => {
+    const cat = categorizeRule(p.id);
+    categories[cat].passes++;
+  });
+  
+  // 카테고리별 점수 계산
+  const byCategory = {};
+  Object.entries(categories).forEach(([key, data]) => {
+    const total = data.violations + data.passes;
+    byCategory[key] = total > 0 
+      ? Math.round((data.passes / total) * 100) 
+      : 100;
+  });
+  
+  return {
+    overallCompliance,
+    wcagLevel,
+    violations: violations.length,
+    passes: passes.length,
+    byCategory,
+    levelA: {
+      total: totalTests,
+      passed: passes.length,
+      failed: violations.length,
+      compliance: overallCompliance
+    },
+    levelAA: {
+      total: violations.filter(v => v.tags?.includes('wcag2aa')).length,
+      passed: passes.filter(p => p.tags?.includes('wcag2aa')).length,
+      failed: violations.filter(v => v.tags?.includes('wcag2aa')).length,
+      compliance: 0
+    }
+  };
 }
 
 module.exports = {
